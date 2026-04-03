@@ -63,3 +63,34 @@ App runs at `http://localhost:5173`.
 4. Open automation panel to show weather-trigger notifications.
 5. Show auto-generated claim (if severe weather exists) or submit a manual claim.
 6. Highlight claim status and auto-approval logic.
+
+## Deploy On Netlify (Frontend)
+
+This project is full-stack. Netlify should host the `frontend/` app, while backend API should be deployed to a Node host (for example Render, Railway, or Fly.io).
+
+### 1) Deploy backend first
+
+- Deploy `backend/` to a Node runtime host.
+- Ensure it is publicly accessible, for example `https://your-backend.example.com/api`.
+
+### 2) Deploy frontend to Netlify
+
+- Push repo to GitHub (already done).
+- In Netlify, choose **Add new site** -> **Import from Git**.
+- Select this repository.
+- Netlify auto-reads `netlify.toml`:
+  - Base directory: `frontend`
+  - Build command: `npm run build`
+  - Publish directory: `dist`
+
+### 3) Add required Netlify env var
+
+In Netlify Site Settings -> Environment variables, add:
+
+- `VITE_API_BASE_URL` = `https://your-backend-host/api`
+
+Then trigger redeploy.
+
+### 4) SPA routing
+
+`netlify.toml` already includes redirect rules so React Router routes load correctly.
