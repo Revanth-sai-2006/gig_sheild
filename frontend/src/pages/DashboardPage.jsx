@@ -14,13 +14,27 @@ export default function DashboardPage() {
   const [catalog, setCatalog] = useState([]);
   const [activePolicies, setActivePolicies] = useState([]);
   const [claims, setClaims] = useState([]);
+  const [payoutGateways, setPayoutGateways] = useState([]);
+  const [metrics, setMetrics] = useState(null);
   const [automation, setAutomation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [reviewingClaimId, setReviewingClaimId] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState("");
   const [authToast, setAuthToast] = useState("");
-  const [manualClaim, setManualClaim] = useState({ policyId: "", claimType: "weather_disruption", description: "", amount: 100 });
+  const [manualClaim, setManualClaim] = useState({
+    policyId: "",
+    claimType: "weather_disruption",
+    description: "",
+    amount: 100,
+    payoutGateway: "razorpay_test",
+    claimedWeather: "",
+    reportedLocationLat: "",
+    reportedLocationLon: "",
+    deliveryLocationLat: "",
+    deliveryLocationLon: ""
+  });
 
   const firstName = useMemo(() => user?.name?.trim()?.split(/\s+/)[0] || "there", [user?.name]);
 
@@ -29,19 +43,26 @@ export default function DashboardPage() {
     setError("");
 
     try {
-      const [catalogRes, activeRes, claimsRes, automationRes] = await Promise.all([
+      const [catalogRes, activeRes, claimsRes, automationRes, metricsRes, gatewaysRes] = await Promise.all([
         policyApi.list(),
         policyApi.active(),
         claimApi.list(),
-        automationApi.status()
+        automationApi.status(),
+        claimApi.metrics(),
+        claimApi.gateways()
       ]);
 
       setCatalog(catalogRes.data);
       setActivePolicies(activeRes.data);
       setClaims(claimsRes.data);
       setAutomation(automationRes.data);
+      setMetrics(metricsRes.data);
+      setPayoutGateways(gatewaysRes.data || []);
       if (!manualClaim.policyId && activeRes.data.length > 0) {
         setManualClaim((prev) => ({ ...prev, policyId: activeRes.data[0].id }));
+      }
+      if (!manualClaim.payoutGateway && (gatewaysRes.data || []).length > 0) {
+        setManualClaim((prev) => ({ ...prev, payoutGateway: gatewaysRes.data[0].code }));
       }
     } catch (apiError) {
       setError(apiError?.response?.data?.message || "Failed to load dashboard data");
@@ -109,13 +130,53 @@ export default function DashboardPage() {
     setError("");
 
     try {
-      await claimApi.create({
-        ...manualClaim,
+      const reportedLocation =
+        manualClaim.reportedLocationLat !== "" && manualClaim.reportedLocationLon !== ""
+          ? {
+              lat: Number(manualClaim.reportedLocationLat),
+              lon: Number(manualClaim.reportedLocationLon)
+            }
+          : undefined;
+
+      const deliveryLocation =
+        manualClaim.deliveryLocationLat !== "" && manualClaim.deliveryLocationLon !== ""
+          ? {
+              lat: Number(manualClaim.deliveryLocationLat),
+              lon: Number(manualClaim.deliveryLocationLon)
+            }
+          : undefined;
+
+      const { data: createdClaim } = await claimApi.create({
+        policyId: manualClaim.policyId,
+        claimType: manualClaim.claimType,
+        description: manualClaim.description,
         amount: Number(manualClaim.amount),
+        payoutGateway: manualClaim.payoutGateway,
+        claimedWeather: manualClaim.claimedWeather || undefined,
+        reportedLocation,
+        deliveryLocation,
         triggerCodes: automation?.triggers?.map((trigger) => trigger.code) || []
       });
-      setManualClaim((prev) => ({ ...prev, description: "", amount: 100 }));
-      showToast("Claim submitted successfully.");
+      setManualClaim((prev) => ({
+        ...prev,
+        description: "",
+        amount: 100,
+        payoutGateway: prev.payoutGateway || "razorpay_test",
+        claimedWeather: "",
+        reportedLocationLat: "",
+        reportedLocationLon: "",
+        deliveryLocationLat: "",
+        deliveryLocationLon: ""
+      }));
+      if (createdClaim?.status === "approved") {
+        showToast("Claim approved successfully. Payout is processing.");
+      } else if (createdClaim?.status === "pending") {
+        showToast("Claim submitted successfully and is pending review.");
+      } else if (createdClaim?.status === "rejected") {
+        showToast("Claim rejected. Please review claim details and try again.");
+      } else {
+        showToast("Claim submitted successfully.");
+      }
       await refreshData();
     } catch (apiError) {
       setError(apiError?.response?.data?.message || "Could not submit claim");
@@ -128,6 +189,35 @@ export default function DashboardPage() {
       await refreshData();
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleReviewClaim = async (claimId, decision) => {
+    setError("");
+    setReviewingClaimId(claimId);
+
+    try {
+      const reviewReason =
+        decision === "approve"
+          ? "Approved via manual review dashboard action."
+          : "Rejected via manual review dashboard action.";
+
+      const { data: reviewedClaim } = await claimApi.review(claimId, {
+        decision,
+        reviewReason
+      });
+
+      if (reviewedClaim?.status === "approved") {
+        showToast("Claim approved successfully from pending review.");
+      } else {
+        showToast("Pending claim rejected successfully.");
+      }
+
+      await refreshData();
+    } catch (apiError) {
+      setError(apiError?.response?.data?.message || "Could not review pending claim");
+    } finally {
+      setReviewingClaimId("");
     }
   };
 
@@ -156,28 +246,39 @@ export default function DashboardPage() {
   };
 
   const stats = useMemo(() => {
-    const avgPremium =
-      activePolicies.length > 0
-        ? (
-            activePolicies.reduce((sum, policy) => sum + policy.weeklyPremium, 0) / activePolicies.length
-          ).toFixed(2)
-        : "0.00";
+    const protectedEarnings = Number(metrics?.worker?.totalProtectedEarnings || 0).toFixed(0);
+    const activeCoverage = Number(metrics?.worker?.activeCoverage || 0).toFixed(0);
+    const fraudFlags = metrics?.admin?.fraudFlaggedClaims || 0;
 
     return [
-      { label: "Active Policies", value: String(activePolicies.length), hint: "Purchased and currently running" },
-      { label: "Avg Weekly Premium", value: `$${avgPremium}`, hint: "Updated from live weather/risk data" },
+      { label: "Total Protected Earnings", value: `$${protectedEarnings}`, hint: "Approved claims secured" },
+      { label: "Weekly Coverage Active", value: `$${activeCoverage}`, hint: "Current active protection" },
       {
-        label: "Claims",
-        value: String(claims.length),
-        hint: `${claims.filter((claim) => claim.status === "approved").length} approved`
+        label: "Claims History",
+        value: String(metrics?.worker?.totalClaims || claims.length),
+        hint: `${metrics?.worker?.approvedClaims || claims.filter((claim) => claim.status === "approved").length} approved`
       },
       {
-        label: "Automation Triggers",
-        value: String(automation?.triggers?.length || 0),
-        hint: "Weather, flood, wind, traffic, heatwave"
+        label: "Fraud Flags",
+        value: String(fraudFlags),
+        hint: "GPS, weather mismatch, high-frequency signals"
       }
     ];
-  }, [activePolicies, claims, automation]);
+  }, [metrics, claims]);
+
+  const workerClaimHistory = metrics?.worker?.claimHistory || [];
+  const workerClaimMax = Math.max(...workerClaimHistory.map((entry) => entry.amount), 1);
+  const adminWeeklyTrend = metrics?.admin?.weeklyTrend || [];
+  const adminWeeklyMax = Math.max(...adminWeeklyTrend.map((entry) => entry.total), 1);
+  const gatewayLabelMap = useMemo(
+    () =>
+      Object.fromEntries(
+        (payoutGateways || []).map((gateway) => {
+          return [gateway.code, gateway.label];
+        })
+      ),
+    [payoutGateways]
+  );
 
   const analyticsFeed = useMemo(() => {
     const avgPremium =
@@ -238,6 +339,27 @@ export default function DashboardPage() {
       refreshedAt: new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     };
   }, [automation?.weather, now]);
+
+  const formatLatency = (startIso, endIso) => {
+    if (!startIso || !endIso) {
+      return "N/A";
+    }
+
+    const start = new Date(startIso).getTime();
+    const end = new Date(endIso).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      return "N/A";
+    }
+
+    const seconds = Math.round((end - start) / 1000);
+    if (seconds < 60) {
+      return `${seconds}s`;
+    }
+
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  };
 
   return (
     <div className="dashboard-shell" ref={shellRef} onMouseMove={handleParallaxMove} onMouseLeave={resetParallax}>
@@ -470,6 +592,49 @@ export default function DashboardPage() {
               onChange={(event) => setManualClaim((prev) => ({ ...prev, amount: event.target.value }))}
               required
             />
+            <select
+              value={manualClaim.payoutGateway}
+              onChange={(event) => setManualClaim((prev) => ({ ...prev, payoutGateway: event.target.value }))}
+            >
+              {(payoutGateways || []).map((gateway) => (
+                <option key={gateway.code} value={gateway.code}>
+                  {gateway.label}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Claimed weather (example: heavy_rain)"
+              value={manualClaim.claimedWeather}
+              onChange={(event) => setManualClaim((prev) => ({ ...prev, claimedWeather: event.target.value }))}
+            />
+            <input
+              type="number"
+              step="any"
+              placeholder="Reported lat"
+              value={manualClaim.reportedLocationLat}
+              onChange={(event) => setManualClaim((prev) => ({ ...prev, reportedLocationLat: event.target.value }))}
+            />
+            <input
+              type="number"
+              step="any"
+              placeholder="Reported lon"
+              value={manualClaim.reportedLocationLon}
+              onChange={(event) => setManualClaim((prev) => ({ ...prev, reportedLocationLon: event.target.value }))}
+            />
+            <input
+              type="number"
+              step="any"
+              placeholder="Delivery route lat"
+              value={manualClaim.deliveryLocationLat}
+              onChange={(event) => setManualClaim((prev) => ({ ...prev, deliveryLocationLat: event.target.value }))}
+            />
+            <input
+              type="number"
+              step="any"
+              placeholder="Delivery route lon"
+              value={manualClaim.deliveryLocationLon}
+              onChange={(event) => setManualClaim((prev) => ({ ...prev, deliveryLocationLon: event.target.value }))}
+            />
             <button className="primary-btn" type="submit">
               Submit Claim
             </button>
@@ -480,14 +645,157 @@ export default function DashboardPage() {
             {claims.length === 0 && <p className="subtle">No claims yet.</p>}
             {claims.map((claim) => (
               <article key={claim.id} className="list-card compact">
+                {(() => {
+                  const checks = claim?.fraudAssessment?.checks || {};
+                  const signalTags = [];
+                  if (checks.gpsMismatch) {
+                    signalTags.push("GPS");
+                  }
+                  if (checks.weatherMismatch) {
+                    signalTags.push("WEATHER");
+                  }
+                  if (checks.frequentClaims) {
+                    signalTags.push("FREQUENCY");
+                  }
+
+                  const score = Number(claim?.fraudAssessment?.fraudScore || 0);
+                  const confidence = score >= 70 ? "HIGH" : score >= 45 ? "MEDIUM" : "LOW";
+                  const decisionEnd = claim.reviewedAt || claim.payoutProcessedAt || claim.updatedAt || null;
+                  const decisionLatency = claim.status === "pending" ? "Awaiting review" : formatLatency(claim.createdAt, decisionEnd);
+
+                  return (
+                    <div className="claim-summary-row">
+                      <span className="claim-summary-chip">Signals: {signalTags.length > 0 ? signalTags.join(" + ") : "None"}</span>
+                      <span className="claim-summary-chip">Decision Latency: {decisionLatency}</span>
+                      <span className="claim-summary-chip">Confidence: {confidence}</span>
+                    </div>
+                  );
+                })()}
                 <h4>{claim.claimType}</h4>
                 <p>{claim.description}</p>
                 <p>Amount: ${claim.amount}</p>
                 <p>
                   Status: <span className={`badge ${claim.status}`}>{claim.status}</span>
                 </p>
+                <p>
+                  Payout: <span className={`badge ${claim.payoutStatus || "not_started"}`}>{claim.payoutStatus || "not_started"}</span>
+                </p>
+                <p className="mini">Gateway: {gatewayLabelMap[claim.payoutGateway] || claim.payoutGateway || "N/A"}</p>
+                {claim?.fraudAssessment?.riskLevel && (
+                  <p>
+                    Fraud Risk: <span className={`badge ${claim.fraudAssessment.riskLevel}`}>{claim.fraudAssessment.riskLevel}</span> (
+                    {claim.fraudAssessment.fraudScore}/100)
+                  </p>
+                )}
+                {claim.status === "pending" && (
+                  <div className="claim-review-actions">
+                    <button
+                      className="secondary-btn tiny-btn"
+                      type="button"
+                      disabled={reviewingClaimId === claim.id}
+                      onClick={() => handleReviewClaim(claim.id, "approve")}
+                    >
+                      {reviewingClaimId === claim.id ? "Reviewing..." : "Approve"}
+                    </button>
+                    <button
+                      className="text-btn tiny-btn"
+                      type="button"
+                      disabled={reviewingClaimId === claim.id}
+                      onClick={() => handleReviewClaim(claim.id, "reject")}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                )}
                 <p className="mini">{claim.decisionReason}</p>
+                {claim.payoutMessage && <p className="mini">{claim.payoutMessage}</p>}
+                {claim.payoutTransactionId && <p className="mini">Transaction: {claim.payoutTransactionId}</p>}
+                {(claim.timeline || []).length > 0 && (
+                  <div className="claim-timeline">
+                    <p className="mini timeline-title">Explainable Timeline</p>
+                    {(claim.timeline || []).slice(-6).map((event) => (
+                      <div key={event.id} className="timeline-row">
+                        <span className="timeline-dot" aria-hidden="true" />
+                        <div>
+                          <p className="timeline-heading">{event.title}</p>
+                          <p className="mini">{event.detail}</p>
+                          <p className="timeline-time">{new Date(event.at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid-two reveal reveal-5">
+        <div className="panel glass">
+          <p className="section-tag">Worker Dashboard</p>
+          <h3>Coverage and Earnings Intelligence</h3>
+          <div className="metrics-inline">
+            <article className="metric-tile">
+              <p className="metric-label">Earnings Protected</p>
+              <p className="metric-value">${Number(metrics?.worker?.totalProtectedEarnings || 0).toFixed(0)}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="metric-label">Weekly Coverage</p>
+              <p className="metric-value">${Number(metrics?.worker?.activeCoverage || 0).toFixed(0)}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="metric-label">Approval Ratio</p>
+              <p className="metric-value">
+                {metrics?.worker?.totalClaims
+                  ? `${Math.round(((metrics?.worker?.approvedClaims || 0) / metrics.worker.totalClaims) * 100)}%`
+                  : "0%"}
+              </p>
+            </article>
+          </div>
+          <div className="mini-chart">
+            <h4>Earnings Over Recent Claims</h4>
+            {workerClaimHistory.length === 0 && <p className="subtle">No claims yet for worker trend graph.</p>}
+            {workerClaimHistory.map((entry) => (
+              <div className="bar-row" key={entry.label}>
+                <span className="bar-label">{entry.label}</span>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${Math.max((entry.amount / workerClaimMax) * 100, 6)}%` }} />
+                </div>
+                <span className="bar-value">${entry.amount}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel glass">
+          <p className="section-tag">Admin Dashboard</p>
+          <h3>Loss, Fraud and Prediction Signals</h3>
+          <div className="metrics-inline">
+            <article className="metric-tile">
+              <p className="metric-label">Loss Ratio</p>
+              <p className="metric-value">{Number(metrics?.admin?.lossRatio || 0).toFixed(2)}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="metric-label">Fraud Detected</p>
+              <p className="metric-value">{metrics?.admin?.fraudFlaggedClaims || 0}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="metric-label">Expected Next Week</p>
+              <p className="metric-value">{metrics?.admin?.predictedClaimsNextWeek || 0}</p>
+            </article>
+          </div>
+          <div className="mini-chart">
+            <h4>Claims Trend Heat Bars</h4>
+            {adminWeeklyTrend.length === 0 && <p className="subtle">Trend model is warming up.</p>}
+            {adminWeeklyTrend.map((entry) => (
+              <div className="bar-row" key={entry.weekLabel}>
+                <span className="bar-label">{entry.weekLabel}</span>
+                <div className="bar-track">
+                  <div className="bar-fill risk" style={{ width: `${Math.max((entry.total / adminWeeklyMax) * 100, 6)}%` }} />
+                </div>
+                <span className="bar-value">{entry.total}</span>
+              </div>
             ))}
           </div>
         </div>

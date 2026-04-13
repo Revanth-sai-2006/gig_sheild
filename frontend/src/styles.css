@@ -1107,6 +1107,21 @@ button {
   color: #8c5b0f;
 }
 
+.badge.processing {
+  background: #e4ecff;
+  color: #244b8e;
+}
+
+.badge.paid {
+  background: #dff3e8;
+  color: #216542;
+}
+
+.badge.not_started {
+  background: #eef2f7;
+  color: #4e5f74;
+}
+
 .badge.rejected {
   background: #f9ddd9;
   color: #8c2218;
@@ -1127,6 +1142,169 @@ button {
 .auth-card .primary-btn,
 .panel .primary-btn {
   letter-spacing: 0.01em;
+}
+
+.metrics-inline {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.metric-tile {
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.75rem;
+}
+
+:root[data-theme="dark"] .metric-tile {
+  background: rgba(21, 35, 52, 0.84);
+}
+
+.metric-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.metric-value {
+  margin-top: 0.2rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #14365b;
+}
+
+:root[data-theme="dark"] .metric-value {
+  color: #e3eeff;
+}
+
+.mini-chart {
+  margin-top: 0.9rem;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  padding: 0.82rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+:root[data-theme="dark"] .mini-chart {
+  background: rgba(19, 32, 48, 0.84);
+}
+
+.mini-chart h4 {
+  margin-bottom: 0.6rem;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 56px;
+  gap: 0.55rem;
+  align-items: center;
+  margin-top: 0.52rem;
+}
+
+.bar-label,
+.bar-value {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.bar-track {
+  height: 0.52rem;
+  border-radius: 999px;
+  background: rgba(16, 32, 47, 0.08);
+  overflow: hidden;
+}
+
+:root[data-theme="dark"] .bar-track {
+  background: rgba(156, 182, 214, 0.2);
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f67a7, #63a6eb);
+}
+
+.bar-fill.risk {
+  background: linear-gradient(90deg, #be7a2d, #d14f39);
+}
+
+.claim-review-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+
+.tiny-btn {
+  padding: 0.38rem 0.62rem;
+  border-radius: 9px;
+  font-size: 0.78rem;
+}
+
+.claim-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.45rem;
+}
+
+.claim-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.46rem;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.64);
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .claim-summary-chip {
+  background: rgba(24, 39, 58, 0.9);
+}
+
+.claim-timeline {
+  margin-top: 0.6rem;
+  border-top: 1px dashed var(--edge);
+  padding-top: 0.5rem;
+}
+
+.timeline-title {
+  margin-bottom: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 0.45rem;
+  margin-top: 0.38rem;
+}
+
+.timeline-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2f67a7, #63a6eb);
+  margin-top: 0.34rem;
+}
+
+.timeline-heading {
+  font-size: 0.79rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.timeline-time {
+  margin-top: 0.1rem;
+  font-size: 0.7rem;
+  color: var(--muted);
 }
 
 @keyframes rise {
@@ -1242,6 +1420,10 @@ button {
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metrics-inline {
+    grid-template-columns: 1fr;
   }
 
   .grid-two {

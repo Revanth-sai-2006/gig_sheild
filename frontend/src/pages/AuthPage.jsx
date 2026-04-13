@@ -79,7 +79,7 @@ export default function AuthPage() {
         await login({ email: form.email, password: form.password });
       }
     } catch (apiError) {
-      setError(apiError?.response?.data?.message || "Something went wrong.");
+      setError(apiError?.userMessage || apiError?.response?.data?.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }

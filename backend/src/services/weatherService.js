@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const locationCoordinates = {
+export const locationCoordinates = {
   mumbai: { lat: 19.076, lon: 72.8777 },
   delhi: { lat: 28.6139, lon: 77.209 },
   bangalore: { lat: 12.9716, lon: 77.5946 },
@@ -54,15 +54,29 @@ function mockWeather(location) {
   };
 }
 
-export async function fetchWeatherForLocation(location = "") {
-  const normalized = location.toLowerCase().trim();
-  const coords = locationCoordinates[normalized] || locationCoordinates.mumbai;
+function buildWeatherPayload(data) {
+  const code = data?.current?.weather_code;
+  const condition = weatherCodeMap[code] || "unknown";
+
+  return {
+    source: "open-meteo",
+    temperature: data?.current?.temperature_2m ?? 25,
+    windSpeed: data?.current?.wind_speed_10m ?? 10,
+    precipitation: data?.daily?.precipitation_sum?.[0] ?? 0,
+    condition
+  };
+}
+
+export async function fetchWeatherForCoordinates(lat, lon) {
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) {
+    return mockWeather("default");
+  }
 
   try {
     const { data } = await axios.get("https://api.open-meteo.com/v1/forecast", {
       params: {
-        latitude: coords.lat,
-        longitude: coords.lon,
+        latitude: Number(lat),
+        longitude: Number(lon),
         current: "temperature_2m,wind_speed_10m,weather_code",
         daily: "precipitation_sum",
         forecast_days: 1,
@@ -71,17 +85,14 @@ export async function fetchWeatherForLocation(location = "") {
       timeout: 5000
     });
 
-    const code = data?.current?.weather_code;
-    const condition = weatherCodeMap[code] || "unknown";
-
-    return {
-      source: "open-meteo",
-      temperature: data?.current?.temperature_2m ?? 25,
-      windSpeed: data?.current?.wind_speed_10m ?? 10,
-      precipitation: data?.daily?.precipitation_sum?.[0] ?? 0,
-      condition
-    };
+    return buildWeatherPayload(data);
   } catch (error) {
-    return mockWeather(normalized || "default");
+    return mockWeather("default");
   }
+}
+
+export async function fetchWeatherForLocation(location = "") {
+  const normalized = location.toLowerCase().trim();
+  const coords = locationCoordinates[normalized] || locationCoordinates.mumbai;
+  return fetchWeatherForCoordinates(coords.lat, coords.lon);
 }
